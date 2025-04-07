@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL") // Make sure this is set in your .env file
+}
+model Strategy {
+  id          String         @id @default(uuid())
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  isActive    Boolean        @default(false)
+  // --- FIX: Added @unique attribute ---
+  rootBlockId String?        @unique // Optional: Link to the top-level block. MUST be unique for 1:1.
+  rootBlock   StrategyBlock? @relation("StrategyRoot", fields: [rootBlockId], references: [id], onDelete: SetNull) // A strategy has one root
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  blocks      StrategyBlock[] // Added back-relation for convenience if needed
+}
+
+enum StrategyBlockType {
+  ROOT
+  WEIGHT // Allocation block
+  ASSET
+  GROUP
+  CONDITION_IF // Represents the IF part, holds the condition logic
+  FILTER
+  ACTION // Make Action a block type itself? Or link Actions separately?
+}
+
+model StrategyBlock {
+  id         String            @id @default(uuid())
+  strategyId String            // Which strategy it belongs to
+  strategy   Strategy          @relation(fields: [strategyId], references: [id], onDelete: Cascade) // This is the MANY side of Strategy <-> Blocks
+  blockType  StrategyBlockType
+  parameters Json
+
+  parentId String?
+  parent   StrategyBlock?    @relation("BlockHierarchy", fields: [parentId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  children StrategyBlock[]   @relation("BlockHierarchy")
+
+  // --- FIX: This is the back-relation for the 1:1 rootBlock relationship ---
+  strategyRoot Strategy? @relation("StrategyRoot") // Back-relation to Strategy where this block is the root
+
+  conditionId String?
+  condition   Condition? @relation(fields: [conditionId], references: [id], onDelete: SetNull)
+
+  actionId String?
+  action   Action?    @relation(fields: [actionId], references: [id], onDelete: SetNull)
+
+  order Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([strategyId])
+  @@index([parentId])
+  @@index([conditionId])
+  @@index([actionId])
+}
+
+enum Operator {
+  EQUALS
+  NOT_EQUALS
+  GREATER_THAN
+  LESS_THAN
+  GREATER_THAN_OR_EQUAL
+  LESS_THAN_OR_EQUAL
+  CROSSES_ABOVE
+  CROSSES_BELOW
+}
+
+model Condition {
+  id            String  @id @default(uuid())
+  indicatorType String
+  dataSource    String?
+  dataKey       String?
+  symbol        String? //Ticker
+  interval      String?
+  parameters    Json
+  operator      Operator
+  targetValue   Float?
+
+  targetIndicatorId String?
+  targetIndicator   Condition?  @relation("ConditionComparison", fields: [targetIndicatorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  comparisonSource  Condition[] @relation("ConditionComparison")
+
+  strategyBlocks StrategyBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([indicatorType, symbol, interval])
+}
+
+enum ActionType {
+  BUY
+  SELL
+  NOTIFY
+  REBALANCE
+  LOG_MESSAGE
+}
+
+model Action {
+  id         String   @id @default(uuid())
+  actionType ActionType
+  parameters Json
+  order      Int      @default(0)
+
+  strategyBlocks StrategyBlock[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id         String     @id @default(uuid())
+  email      String     @unique
+  strategies Strategy[]
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+}
